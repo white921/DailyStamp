@@ -2,6 +2,6 @@
   "$schema": "https://railway.app/railway.schema.json",
   "deploy": {
     "startCommand": "npm start",
-    "preDeployCommand": "npm run register"
+    "preDeployCommand": "npm run build && npm run register"
   }
 }

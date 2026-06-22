@@ -1,4 +1,7 @@
 import express from "express";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -19,9 +22,21 @@ const app = express();
 const client = config.discordBotDisabled
   ? null
   : new Client({ intents: [GatewayIntentBits.Guilds] });
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+const distDirectory = path.resolve(currentDirectory, "../dist");
+const distIndexPath = path.join(distDirectory, "index.html");
 
 app.use(express.json());
-app.use(express.static("public"));
+app.use(express.static(distDirectory));
+
+function sendClient(response) {
+  if (!existsSync(distIndexPath)) {
+    response.status(503).send("Web client is not built yet. Run `npm run build` first.");
+    return;
+  }
+
+  response.sendFile(distIndexPath);
+}
 
 function buildAppUrl(userId) {
   const token = createLinkToken({
@@ -44,10 +59,6 @@ function resolveSession(request) {
 
 app.get("/health", (_request, response) => {
   response.json({ ok: true });
-});
-
-app.get("/app", (_request, response) => {
-  response.sendFile(new URL("../public/index.html", import.meta.url).pathname);
 });
 
 app.get("/api/session", async (request, response) => {
@@ -100,6 +111,18 @@ app.post("/api/stamps/toggle", async (request, response) => {
           : 500;
     response.status(status).json({ message: "スタンプの更新に失敗しました。" });
   }
+});
+
+app.get("/", (_request, response) => {
+  sendClient(response);
+});
+
+app.get("/app", (_request, response) => {
+  sendClient(response);
+});
+
+app.get("/app/*route", (_request, response) => {
+  sendClient(response);
 });
 
 if (client) {

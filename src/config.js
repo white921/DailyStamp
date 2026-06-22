@@ -13,9 +13,14 @@ if (!discordBotDisabled) {
   requiredEnvironmentVariables.push(
     "DISCORD_TOKEN",
     "DISCORD_CLIENT_ID",
-    "DISCORD_GUILD_ID",
+    "DISCORD_GUILD_IDS",
   );
 }
+
+const discordGuildIds = (process.env.DISCORD_GUILD_IDS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 for (const key of requiredEnvironmentVariables) {
   if (!process.env[key]) {
@@ -23,11 +28,15 @@ for (const key of requiredEnvironmentVariables) {
   }
 }
 
+if (!discordBotDisabled && discordGuildIds.length === 0) {
+  throw new Error("Missing required environment variable: DISCORD_GUILD_IDS");
+}
+
 export const config = {
   discordBotDisabled,
   discordToken: process.env.DISCORD_TOKEN,
   discordClientId: process.env.DISCORD_CLIENT_ID,
-  discordGuildId: process.env.DISCORD_GUILD_ID,
+  discordGuildIds,
   appBaseUrl: process.env.APP_BASE_URL.replace(/\/$/, ""),
   port: Number(process.env.PORT ?? 3000),
   linkTokenSecret: process.env.LINK_TOKEN_SECRET,
