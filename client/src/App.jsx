@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const token = new URLSearchParams(window.location.search).get("token");
+const habitThemes = [
+  { fill: "#ff8ba7", ring: "#ffd0dc", glow: "rgba(255, 139, 167, 0.28)" },
+  { fill: "#7fc8f8", ring: "#d8f0ff", glow: "rgba(127, 200, 248, 0.26)" },
+  { fill: "#8bd3a8", ring: "#d7f7e3", glow: "rgba(139, 211, 168, 0.26)" },
+  { fill: "#f6b26b", ring: "#ffe3c1", glow: "rgba(246, 178, 107, 0.28)" },
+  { fill: "#c69cf2", ring: "#efdefd", glow: "rgba(198, 156, 242, 0.24)" },
+  { fill: "#ff9f68", ring: "#ffe1d0", glow: "rgba(255, 159, 104, 0.24)" },
+];
 
 function formatMonth(monthKey) {
   const [year, month] = monthKey.split("-").map(Number);
@@ -18,6 +26,10 @@ function shiftMonth(monthKey, amount) {
 
 function createDateString(monthKey, day) {
   return `${monthKey}-${String(day).padStart(2, "0")}`;
+}
+
+function getHabitStampLabel(habitName) {
+  return habitName.slice(0, 2);
 }
 
 async function fetchSession(monthKey) {
@@ -50,51 +62,112 @@ async function toggleStamp(habitId, stampDate) {
   return response.json();
 }
 
-function HabitCard({ habit, daysInMonth, startsOn, currentMonthKey, today }) {
-  const stamps = useMemo(() => new Set(habit.stamps), [habit.stamps]);
-
+function HabitLegend({ habits }) {
   return (
-    <article className="habit-card">
-      <div className="habit-header">
+    <section className="legend-card">
+      <div className="legend-header">
         <div>
-          <h2>{habit.name}</h2>
-          <p>押してある日をカレンダーで確認</p>
+          <p className="mini-eyebrow">Color Stamps</p>
+          <h2>習慣ごとのスタンプ</h2>
         </div>
-        <p className="stamp-count">{habit.stamps.length} days stamped</p>
+        <p>押すとカレンダーにぽんっと乗ります。</p>
       </div>
 
-      <div className="calendar-grid">
+      <div className="legend-list">
+        {habits.map((habit) => (
+          <div key={habit.id} className="legend-pill">
+            <span
+              className="legend-dot"
+              style={{
+                "--stamp-fill": habit.theme.fill,
+                "--stamp-ring": habit.theme.ring,
+                "--stamp-glow": habit.theme.glow,
+              }}
+            >
+              {getHabitStampLabel(habit.name)}
+            </span>
+            <div>
+              <strong>{habit.name}</strong>
+              <p>{habit.stamps.length} days stamped</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CalendarBoard({
+  currentMonthKey,
+  daysInMonth,
+  startsOn,
+  today,
+  stampsByDate,
+  lastStampEvent,
+}) {
+  return (
+    <section className="calendar-card">
+      <div className="calendar-grid calendar-grid-head">
         {weekdayLabels.map((weekday) => (
           <div key={weekday} className="weekday">
             {weekday}
           </div>
         ))}
+      </div>
 
+      <div className="calendar-grid">
         {Array.from({ length: startsOn }).map((_, index) => (
-          <div key={`empty-${habit.id}-${index}`} className="day-cell empty" />
+          <div key={`empty-${index}`} className="day-cell empty" />
         ))}
 
         {Array.from({ length: daysInMonth }).map((_, index) => {
           const day = index + 1;
           const stampDate = createDateString(currentMonthKey, day);
-          const stamped = stamps.has(stampDate);
+          const dayStamps = stampsByDate.get(stampDate) ?? [];
 
           return (
             <div
-              key={`${habit.id}-${stampDate}`}
+              key={stampDate}
               className={[
                 "day-cell",
                 stampDate === today ? "today" : "",
-                stamped ? "stamped" : "",
+                dayStamps.length > 0 ? "has-stamps" : "",
               ].join(" ").trim()}
             >
-              <strong>{day}</strong>
-              <span className="stamp-mark">{stamped ? "●" : ""}</span>
+              <div className="day-cell-top">
+                <strong className="day-number">{day}</strong>
+                {stampDate === today ? <span className="today-badge">today</span> : null}
+              </div>
+
+              <div className="stamp-stack">
+                {dayStamps.map((stamp) => {
+                  const isPopping =
+                    lastStampEvent &&
+                    lastStampEvent.stamped &&
+                    lastStampEvent.stampDate === stampDate &&
+                    lastStampEvent.habitId === stamp.id;
+
+                  return (
+                    <span
+                      key={`${stamp.id}-${stampDate}-${isPopping ? lastStampEvent.eventId : "base"}`}
+                      className={`stamp-seal${isPopping ? " pop-in" : ""}`}
+                      style={{
+                        "--stamp-fill": stamp.theme.fill,
+                        "--stamp-ring": stamp.theme.ring,
+                        "--stamp-glow": stamp.theme.glow,
+                      }}
+                      title={stamp.name}
+                    >
+                      <span>{getHabitStampLabel(stamp.name)}</span>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
-    </article>
+    </section>
   );
 }
 
@@ -111,6 +184,38 @@ export function App() {
     : "トークンがありません。Discord のパネルから開いてください。");
   const [selectionHint, setSelectionHint] = useState("");
   const [loading, setLoading] = useState(false);
+  const [lastStampEvent, setLastStampEvent] = useState(null);
+
+  const decoratedHabits = useMemo(
+    () =>
+      (session?.habits ?? []).map((habit, index) => ({
+        ...habit,
+        theme: habitThemes[index % habitThemes.length],
+      })),
+    [session],
+  );
+
+  const stampsByDate = useMemo(() => {
+    const map = new Map();
+
+    for (const habit of decoratedHabits) {
+      for (const stampedDate of habit.stamps) {
+        const entry = map.get(stampedDate) ?? [];
+        entry.push({
+          id: habit.id,
+          name: habit.name,
+          theme: habit.theme,
+        });
+        map.set(stampedDate, entry);
+      }
+    }
+
+    for (const entry of map.values()) {
+      entry.sort((left, right) => Number(left.id) - Number(right.id));
+    }
+
+    return map;
+  }, [decoratedHabits]);
 
   useEffect(() => {
     if (!token) {
@@ -132,8 +237,8 @@ export function App() {
         setSession(nextSession);
         setStampDate(nextSession.today);
         setSelectedHabitId((currentValue) => currentValue || String(nextSession.habits[0]?.id ?? ""));
-        setStatus("日付と習慣を選んで STAMP を押してください。すでに押した組み合わせは、もう一度押すと取り消しになります。");
-        setSelectionHint("下のカレンダーには、今月押してあるスタンプだけが表示されます。");
+        setStatus("日付と習慣を選んで、かわいく STAMP。もう一度押すと取り消しできます。");
+        setSelectionHint("カレンダーはひとつ。習慣ごとの色スタンプが毎日のマスに並びます。");
       } catch (error) {
         if (!active) {
           return;
@@ -157,7 +262,7 @@ export function App() {
       return;
     }
 
-    const habit = session.habits.find((item) => String(item.id) === selectedHabitId);
+    const habit = decoratedHabits.find((item) => String(item.id) === selectedHabitId);
 
     if (!habit || !stampDate) {
       setStatus("日付と習慣を選んでください。");
@@ -165,17 +270,24 @@ export function App() {
     }
 
     setLoading(true);
-    setStatus(`${habit.name} の ${stampDate} を更新しています...`);
+    setStatus(`${habit.name} の ${stampDate} にスタンプを準備しています...`);
 
     try {
       const result = await toggleStamp(Number(selectedHabitId), stampDate);
       const nextSession = await fetchSession(currentMonthKey);
+
       setSession(nextSession);
-      setStatus("日付と習慣を選んで STAMP を押してください。すでに押した組み合わせは、もう一度押すと取り消しになります。");
+      setLastStampEvent({
+        habitId: Number(selectedHabitId),
+        stampDate,
+        stamped: result.stamped,
+        eventId: Date.now(),
+      });
+      setStatus("日付と習慣を選んで、かわいく STAMP。もう一度押すと取り消しできます。");
       setSelectionHint(
         result.stamped
-          ? `${habit.name} に ${stampDate} のスタンプを押しました。`
-          : `${habit.name} の ${stampDate} のスタンプを取り消しました。`,
+          ? `${habit.name} のスタンプをぽんっと押しました。`
+          : `${habit.name} のスタンプを外しました。`,
       );
     } catch (error) {
       setStatus("更新に失敗しました。ページを再読み込みしてください。");
@@ -191,9 +303,9 @@ export function App() {
       <main className="shell">
         <section className="hero">
           <p className="eyebrow">DailyStamp</p>
-          <h1>毎日の達成を、カレンダーに残す。</h1>
+          <h1>ぽんっと押して、毎日を彩る。</h1>
           <p className="lead">
-            Discord のパネルから開いた自分専用ページで、日付と習慣を選んでスタンプを押せます。
+            Discord のパネルから開いた自分専用ページで、日付と習慣を選ぶと色付きスタンプがカレンダーに乗ります。
           </p>
 
           <form className="stamp-form" onSubmit={handleSubmit}>
@@ -214,7 +326,7 @@ export function App() {
                 value={selectedHabitId}
                 onChange={(event) => setSelectedHabitId(event.target.value)}
               >
-                {(session?.habits ?? []).map((habit) => (
+                {decoratedHabits.map((habit) => (
                   <option key={habit.id} value={String(habit.id)}>
                     {habit.name}
                   </option>
@@ -223,7 +335,7 @@ export function App() {
             </label>
 
             <button type="submit" disabled={loading || !token}>
-              STAMP を押す
+              {loading ? "STAMP中..." : "STAMP を押す"}
             </button>
           </form>
 
@@ -252,18 +364,19 @@ export function App() {
         <section className="status-card">{status}</section>
         <section className="selection-hint">{selectionHint}</section>
 
-        <section className="habit-list">
-          {(session?.habits ?? []).map((habit) => (
-            <HabitCard
-              key={habit.id}
-              habit={habit}
+        {session ? (
+          <div className="calendar-layout">
+            <CalendarBoard
+              currentMonthKey={session.monthKey}
               daysInMonth={session.daysInMonth}
               startsOn={session.startsOn}
-              currentMonthKey={session.monthKey}
               today={session.today}
+              stampsByDate={stampsByDate}
+              lastStampEvent={lastStampEvent}
             />
-          ))}
-        </section>
+            <HabitLegend habits={decoratedHabits} />
+          </div>
+        ) : null}
       </main>
     </div>
   );
